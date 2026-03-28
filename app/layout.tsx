@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AI留学申请助手 - 智能匹配学校与导师",
-  description: "基于Claude AI的留学申请平台，智能解析简历，精准推荐学校和导师，一键生成PS、SOP、陶瓷邮件等申请材料",
+  description: "AI留学申请平台，智能解析简历，精准推荐学校和导师，一键生成PS、SOP、陶瓷邮件等申请材料",
 };
 
 export default function RootLayout({

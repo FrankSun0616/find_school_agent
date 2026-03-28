@@ -3,15 +3,13 @@
 import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, X, Loader2 } from 'lucide-react';
-import { AIConfig } from '@/components/AISettings';
 
 interface CVUploaderProps {
   onUploadComplete: (profile: object) => void;
   onError: (error: string) => void;
-  aiConfig: AIConfig;
 }
 
-export default function CVUploader({ onUploadComplete, onError, aiConfig }: CVUploaderProps) {
+export default function CVUploader({ onUploadComplete, onError }: CVUploaderProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [progress, setProgress] = useState('');
@@ -28,8 +26,6 @@ export default function CVUploader({ onUploadComplete, onError, aiConfig }: CVUp
       try {
         const formData = new FormData();
         formData.append('cv', file);
-        formData.append('provider', aiConfig.provider);
-        formData.append('apiKey', aiConfig.apiKey);
 
         setProgress('AI正在分析简历内容...');
 

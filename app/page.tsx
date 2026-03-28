@@ -44,7 +44,7 @@ export default function Home() {
           <div className="flex flex-col items-center text-center">
             <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-sm border border-white/20 rounded-full px-4 py-1.5 text-sm mb-6">
               <Sparkles className="w-4 h-4 text-yellow-300" />
-              由 Claude AI 强力驱动
+              AI 智能驱动 · 专业精准
             </div>
 
             <h1 className="text-5xl sm:text-6xl font-extrabold leading-tight mb-6">
@@ -234,7 +234,7 @@ export default function Home() {
           </div>
           <span className="font-semibold text-gray-600">留学AI助手</span>
         </div>
-        <p>由 Claude AI 提供支持 · 专为留学申请设计</p>
+        <p>AI 智能分析 · 专为留学申请设计</p>
       </footer>
     </div>
   );

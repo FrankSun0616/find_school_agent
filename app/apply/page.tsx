@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, Suspense, useEffect } from 'react';
+import { useState, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -18,7 +18,6 @@ import ProfileDisplay from '@/components/ProfileDisplay';
 import SchoolCard from '@/components/SchoolCard';
 import ProfessorCard from '@/components/ProfessorCard';
 import DocumentEditor from '@/components/DocumentEditor';
-import AISettings, { loadAIConfig, type AIConfig } from '@/components/AISettings';
 
 const STEPS = [
   { id: 1, title: '上传简历', description: 'AI智能解析' },
@@ -73,25 +72,6 @@ function ApplyPageContent() {
   const searchParams = useSearchParams();
   const initialType = searchParams.get('type') as 'phd' | 'master' | null;
 
-  const [aiConfig, setAIConfig] = useState<AIConfig>({ provider: 'anthropic', apiKey: '' });
-
-  useEffect(() => {
-    const saved = loadAIConfig();
-    if (saved.apiKey) {
-      setAIConfig(saved);
-    } else {
-      // No local key — check if server has a default configured
-      fetch('/api/default-config')
-        .then((r) => r.json())
-        .then((data) => {
-          if (data.hasKey) {
-            // Use server-side key (empty string signals "use server env")
-            setAIConfig({ provider: data.provider, apiKey: '' });
-          }
-        })
-        .catch(() => {});
-    }
-  }, []);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -112,6 +92,7 @@ function ApplyPageContent() {
     email: '',
   });
   const [streamingDoc, setStreamingDoc] = useState<DocType | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [tierFilter, setTierFilter] = useState<string>('all');
   const [additionalInfo, setAdditionalInfo] = useState('');
   const [researchInterests, setResearchInterests] = useState('');
@@ -134,13 +115,11 @@ function ApplyPageContent() {
     setError('');
 
     try {
-      const aiPayload = { provider: aiConfig.provider, apiKey: aiConfig.apiKey };
-
       if (applyType === 'master') {
         const res = await fetch('/api/match-schools', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profile, targetField, country: targetCountry, ...aiPayload }),
+          body: JSON.stringify({ profile, targetField, country: targetCountry }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '推荐失败');
@@ -149,7 +128,7 @@ function ApplyPageContent() {
         const res = await fetch('/api/match-professors', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ profile, targetField, country: targetCountry, ...aiPayload }),
+          body: JSON.stringify({ profile, targetField, country: targetCountry }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '推荐失败');
@@ -163,16 +142,30 @@ function ApplyPageContent() {
     }
   };
 
+  const stopStreaming = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setStreamingDoc(null);
+  };
+
   const generateDocument = async (docType: DocType) => {
     if (!profile) return;
+
+    // Cancel any in-progress stream before starting a new one
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     setActiveDocTab(docType);
     setStreamingDoc(docType);
     setDocContents((prev) => ({ ...prev, [docType]: '' }));
 
     try {
-      const aiPayload = { provider: aiConfig.provider, apiKey: aiConfig.apiKey };
-    let endpoint = '';
+      let endpoint = '';
       let body: Record<string, unknown> = { profile };
 
       if (docType === 'ps') {
@@ -182,7 +175,6 @@ function ApplyPageContent() {
           schoolName: selectedSchool?.schoolName || selectedProfessor?.university || '目标学校',
           programName: selectedSchool?.programName || `${applyType === 'phd' ? 'PhD' : 'Master'} Program`,
           additionalInfo,
-          ...aiPayload,
         };
       } else if (docType === 'sop') {
         endpoint = '/api/generate-sop';
@@ -192,7 +184,6 @@ function ApplyPageContent() {
           programName: selectedSchool?.programName || `${applyType === 'phd' ? 'PhD' : 'Master'} Program`,
           researchInterests: researchInterests || targetField,
           professorName: selectedProfessor?.professorName,
-          ...aiPayload,
         };
       } else if (docType === 'resume') {
         endpoint = '/api/optimize-resume';
@@ -200,7 +191,6 @@ function ApplyPageContent() {
           profile,
           schoolName: selectedSchool?.schoolName || selectedProfessor?.university,
           programName: selectedSchool?.programName,
-          ...aiPayload,
         };
       } else if (docType === 'email') {
         if (!selectedProfessor && applyType !== 'phd') {
@@ -215,7 +205,6 @@ function ApplyPageContent() {
           university: selectedProfessor?.university || '目标大学',
           researchArea: selectedProfessor?.researchArea || targetField,
           recentPapers: selectedProfessor?.recentPapers || [],
-          ...aiPayload,
         };
       }
 
@@ -223,6 +212,7 @@ function ApplyPageContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -244,8 +234,13 @@ function ApplyPageContent() {
         setDocContents((prev) => ({ ...prev, [docType]: accumulated }));
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User stopped — not an error
+        return;
+      }
       setError(err instanceof Error ? err.message : '生成失败，请重试');
     } finally {
+      abortControllerRef.current = null;
       setStreamingDoc(null);
     }
   };
@@ -268,9 +263,6 @@ function ApplyPageContent() {
               <GraduationCap className="w-4 h-4 text-white" />
             </div>
             <span className="font-semibold text-gray-800">AI留学申请</span>
-          </div>
-          <div className="ml-auto">
-            <AISettings config={aiConfig} onConfigChange={setAIConfig} />
           </div>
         </div>
       </nav>
@@ -310,7 +302,6 @@ function ApplyPageContent() {
               <CVUploader
                 onUploadComplete={handleProfileUpload}
                 onError={(msg) => setError(msg)}
-                aiConfig={aiConfig}
               />
 
               <div className="mt-6 bg-blue-50 rounded-xl p-4 text-sm text-blue-700">
@@ -617,7 +608,17 @@ function ApplyPageContent() {
 
               {/* Document Type Buttons */}
               <div className="bg-white rounded-xl border border-gray-100 p-4">
-                <h3 className="font-semibold text-gray-700 mb-3 text-sm">生成文书</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-700 text-sm">生成文书</h3>
+                  {streamingDoc && (
+                    <button
+                      onClick={stopStreaming}
+                      className="text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 border border-red-200 transition-colors"
+                    >
+                      停止生成
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-2">
                   {[
                     { key: 'ps' as DocType, label: '个人陈述 (PS)', desc: '展示个人经历和动机' },
@@ -630,12 +631,13 @@ function ApplyPageContent() {
                     <button
                       key={doc.key}
                       onClick={() => generateDocument(doc.key)}
-                      disabled={streamingDoc !== null}
                       className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${
-                        activeDocTab === doc.key
+                        activeDocTab === doc.key && streamingDoc === doc.key
                           ? 'border-blue-500 bg-blue-50'
+                          : activeDocTab === doc.key
+                          ? 'border-blue-400 bg-blue-50'
                           : 'border-gray-100 hover:border-blue-200 hover:bg-gray-50'
-                      } ${streamingDoc !== null ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      }`}
                     >
                       <div className="flex items-center justify-between">
                         <div>
